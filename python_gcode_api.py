@@ -7,8 +7,8 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(filename="api_logs.log", level=logging.INFO)
 
 '''
-Python API for controlling 3D printers.
-Compatible with any printer that uses Marlin-based firmware.
+Python API for controlling 3D printers via serial connection.
+Compatible with any printer that uses Marlin-based firmware. This firmware only supports sequential commands, so there's no live control or feedback.
 '''
 
 class Printer:
@@ -17,35 +17,47 @@ class Printer:
         # Constants
         self.SERIAL_PORT = serial_port  # example: /dev/ttyACM0
         self.BAUDRATE = 115200
-        self.TIMEOUT = 3
+        self.TIMEOUT = 5
+        self.ABS_POS_GCODE = "G90"
         self.REL_POS_GCODE = "G91"
         self.DELAY = 0.1
 
+        # Initialize some variables
         self.conn = None    # serial connection
         self.ok = None
 
+        # Initialize queues
+        self.cmd_queue = []
+
         # Attempt to connect to the device upon object initialization
-        self.connect()
+        connected = self.connect()
+
+        # On successful connection, print printer information
+        if connected:
+            self.PRINTER_INFO = self.getPrinterInfo()
         
 
     def connect(self):
         print(f"Connecting to {self.SERIAL_PORT}")
         try:
-            self.conn = serial.Serial(self.SERIAL_PORT, self.BAUDRATE)
+            self.conn = serial.Serial(self.SERIAL_PORT, self.BAUDRATE, self.TIMEOUT)
             time.sleep(2)
         except Exception as e:
             print("Could not connect")
-            logger.log(0, "Could not connect to serial device.")
+            logger.log(20, "Could not connect to serial device.")
             exit()
 
         if self.conn:
-            logger.log(0, f"Successfully connected to serial device {self.SERIAL_PORT}!")
+            logger.log(20, f"Successfully connected to serial device {self.SERIAL_PORT}!")
             print("Connection successful!")
+
+        return True
 
 
     '''
     READ COMMANDS
     '''
+
     def getPrinterInfo(self):
         '''
         Send M115 to read the printer's information.
@@ -62,6 +74,7 @@ class Printer:
         while response==None:
             if self.conn.in_waiting:
                 response = self.conn.readline().decode("utf-8")
+                logger.log(20, f"{response}!")
                 print(f"> {response}")
             else:
                 time.sleep(0.1)
@@ -95,7 +108,9 @@ class Printer:
         - M18 ; disable steppers
         - M84 ; disable steppers with optional timeout and motor selection
     '''
+    
     def disable_all(self):
+        logger.log(20, f"Disabling all steppers")
         self.write("M84")
         self.check_ok()
 
@@ -116,10 +131,10 @@ class Printer:
 
 
     def homeXYZ(self):
+        logger.log(20, f"Auto-homing with G28")
         self.write("G28")
         self.disable_all()
         self.check_ok()
-
 
         time.sleep(self.DELAY)
 
@@ -130,54 +145,63 @@ class Printer:
     '''
     LINEAR MOVE COMMANDS
     '''
-    def relMoveX(self, steps, speed=500):
+    def relMoveX(self, dist, speed=500):
+        logger.log(20, f"Linear relative X move, dist {dist}, speed {speed}")
 
-        move_gcode = f"G0 X{steps} F{speed}"
+        move_gcode = f"G0 X{dist} F{speed}"
         self.write(self.REL_POS_GCODE)
         self.write(move_gcode)
         # self.disable_all()
         self.check_ok()
 
-
         time.sleep(self.DELAY)
 
+        return self
 
-    def relMoveY(self, steps, speed=500):
 
-        move_gcode = f"G0 Y{steps} F{speed}"
+    def relMoveY(self, dist, speed=500):
+        logger.log(20, f"Linear relative Y move, dist {dist}, speed {speed}")
+        move_gcode = f"G0 Y{dist} F{speed}"
         self.write(self.REL_POS_GCODE)
         self.write(move_gcode)
         # self.disable_all()
         self.check_ok()
 
-
         time.sleep(self.DELAY)
 
+        return self
 
-    def relMoveZ(self, steps, speed=500):
 
-        move_gcode = f"G0 Z{steps} F{speed}"
+    def relMoveZ(self, dist, speed=500):
+        logger.log(20, f"Linear relative Z move, dist {dist}, speed {speed}")
+        move_gcode = f"G0 Z{dist} F{speed}"
         self.write(self.REL_POS_GCODE)
         self.write(move_gcode)
         # self.disable_all()
         self.check_ok()
 
-
         time.sleep(self.DELAY)
+
+        return self
+    
+
+    def relMoveXYZ(self, coords: list, dist, speed=500):
+        pass
 
 
     '''
     NONLINEAR MOVE COMMANDS
     '''
     def relMoveCircle(self, radius, speed):
+        logger.log(20, f"Full circle move, radius {radius}, speed {speed}")
         move_gcode = f"G2 I{radius} J{radius} F{speed}"
         self.write(self.REL_POS_GCODE)
         self.write(move_gcode)
-        # self.disable_all()
         self.check_ok()
 
-
         time.sleep(self.DELAY)
+
+        return self
 
 
     '''
