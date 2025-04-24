@@ -4,8 +4,6 @@ import time
 import asyncio
 from math import sqrt, sin, cos, tan, degrees, radians
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(filename="api_logs.log", level=logging.INFO)
 
 '''
 Python API for controlling 3D printers via serial connection.
@@ -17,6 +15,10 @@ In an attempt to optimize the flow of commands, separate methods are used for va
 to be sent in a single buffer. Reducing the amount of argument parsing and loops will generate the batches quicker. These optimizations come at the
 expense of a slightly more cumbersome library.
 '''
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(filename="api_logs.log", level=logging.INFO)
+
 DEFAULT_SPEED = 5000
 
 class Printer:
@@ -34,6 +36,10 @@ class Printer:
             "SET_REL": "G91",
             "SET_MM": "G21",
             "SET_INCH": "G20",
+
+            "SET_XY_PLANE": "G17",
+            "SET_ZX_PLANE": "G18",
+            "SET_YZ_PLANE": "G19",
 
             "GET_PRT_INFO": "M115",
 
@@ -60,6 +66,9 @@ class Printer:
         # Initialize queues
         self.cmd_queue = []
 
+        # Initialize position list
+        self.pos = []
+
         # Attempt to connect to the device upon object initialization
         connected = self.connect()
 
@@ -69,8 +78,8 @@ class Printer:
 
             # Set parameters
             self.speed= DEFAULT_SPEED  # Mutable speed value
-            self.write(self.GCODE["SET_ABS"])
-            self.write(f"G0 F{self.DEFAULT_SPEED}")
+            self._write(self.GCODE["SET_ABS"])
+            self._write(f"G0 F{DEFAULT_SPEED}")
         
 
     def connect(self):
@@ -106,7 +115,7 @@ class Printer:
         '''
         response = None
 
-        self.write("M115")
+        self._write("M115")
 
         while response==None:
             if self.conn.in_waiting:
@@ -143,24 +152,24 @@ class Printer:
     '''
     def enableMotors(self, motors="XYZ"):
         '''Enables specified motors. If no arguments are passed, all motors will be enabled.'''
-        gcode = f"{self.GCODE["ENABLE_MOTORS"]}"
+        gcode = f"{self.GCODE['ENABLE_MOTORS']}"
 
         for m in motors:
             gcode += f" {m}"
 
-        self.write(gcode)
+        self._write(gcode)
 
         logger.log(20, f"Enabling motors {motors}")
 
     
     def disableMotors(self, motors="XYZ"):
         '''Disables specified motors. If no arguments are passed, all motors will be disabled.'''
-        gcode = f"{self.GCODE["DISABLE_MOTORS"]}"
+        gcode = f"{self.GCODE['DISABLE_MOTORS']}"
 
         for m in motors:
             gcode += f" {m}"
 
-        self.write(gcode)
+        self._write(gcode)
 
         logger.log(20, f"Disabling motors {motors}")
 
@@ -174,19 +183,19 @@ class Printer:
         '''
         match axes:
             case "X":
-                self.write(f"{self.GCODE["AUTO_HOME"]} X")
+                self._write(f"{self.GCODE['AUTO_HOME']} X")
             case "Y":
-                self.write(f"{self.GCODE["AUTO_HOME"]} Y")
+                self._write(f"{self.GCODE['AUTO_HOME']} Y")
             case "Z":
-                self.write(f"{self.GCODE["AUTO_HOME"]} Z")
+                self._write(f"{self.GCODE['AUTO_HOME']} Z")
             case "XY" | "YX":
-                self.write(f"{self.GCODE["AUTO_HOME"]} X Y")
+                self._write(f"{self.GCODE['AUTO_HOME']} X Y")
             case "XZ" | "ZX":
-                self.write(f"{self.GCODE["AUTO_HOME"]} X Z")
+                self._write(f"{self.GCODE['AUTO_HOME']} X Z")
             case "YZ" | "ZY":
-                self.write(f"{self.GCODE["AUTO_HOME"]} Y Z")
+                self._write(f"{self.GCODE['AUTO_HOME']} Y Z")
             case "XYZ":
-                self.write(f"{self.GCODE["AUTO_HOME"]} X Y Z")
+                self._write(f"{self.GCODE['AUTO_HOME']} X Y Z")
             case _:
                 print("Invalid auto-home command.")
                 exit()
@@ -208,7 +217,7 @@ class Printer:
 
     def moveX(self, dist: float):
         '''Linear move in the X direction.'''
-        self.write(f"G0 X{dist}")
+        self._write(f"G0 X{dist}")
         time.sleep(self.DELAY)
 
         return self
@@ -216,7 +225,7 @@ class Printer:
     
     def moveY(self, dist: float):
         '''Linear move in the Y direction.'''
-        self.write(f"G0 Y{dist}")
+        self._write(f"G0 Y{dist}")
         time.sleep(self.DELAY)
 
         return self
@@ -224,7 +233,7 @@ class Printer:
     
     def moveZ(self, dist: float):
         '''Linear move in the Z direction.'''
-        self.write(f"G0 Z{dist}")
+        self._write(f"G0 Z{dist}")
         time.sleep(self.DELAY)
 
         return self
@@ -232,7 +241,7 @@ class Printer:
 
     def moveXY(self, dist: tuple):
         '''Linear move diagonally in the XY direction. Pass a tuple of distances in the order (X,Y).'''
-        self.write(f"G0 X{dist[0]} Y{dist[1]}")
+        self._write(f"G0 X{dist[0]} Y{dist[1]}")
         time.sleep(self.DELAY)
 
         return self
@@ -240,7 +249,7 @@ class Printer:
 
     def moveXZ(self, dist: tuple):
         '''Linear move diagonally in the XZ direction. Pass a tuple of distances in the order (X,Z).'''
-        self.write(f"G0 X{dist[0]} Z{dist[1]}")
+        self._write(f"G0 X{dist[0]} Z{dist[1]}")
         time.sleep(self.DELAY)
 
         return self
@@ -248,7 +257,7 @@ class Printer:
 
     def moveYZ(self, dist: tuple):
         '''Linear move diagonally in the YZ direction. Pass a tuple of distances in the order (Y,Z).'''
-        self.write(f"G0 Y{dist[0]} Z{dist[1]}")
+        self._write(f"G0 Y{dist[0]} Z{dist[1]}")
         time.sleep(self.DELAY)
 
         return self
@@ -256,7 +265,7 @@ class Printer:
 
     def move(self, dist: tuple):
         '''General linear move command. Pass a tuple of distances in the order (X,Y,Z).'''
-        self.write(f"G0 X{dist[0]} Y{dist[1]} Z{dist[2]}")
+        self._write(f"G0 X{dist[0]} Y{dist[1]} Z{dist[2]}")
         time.sleep(self.DELAY)
 
         return self
@@ -268,7 +277,7 @@ class Printer:
 
     def moveSpeedX(self, dist: float, speed: int):
         '''Linear move in the X direction with a speed parameter.'''
-        self.write(f"G0 X{dist} F{speed}")
+        self._write(f"G0 X{dist} F{speed}")
         time.sleep(self.DELAY)
 
         return self
@@ -276,7 +285,7 @@ class Printer:
 
     def moveSpeedY(self, dist: float, speed: int):
         '''Linear move in the Y direction with a speed parameter.'''
-        self.write(f"G0 Y{dist} F{speed}")
+        self._write(f"G0 Y{dist} F{speed}")
         time.sleep(self.DELAY)
 
         return self
@@ -284,7 +293,7 @@ class Printer:
 
     def moveSpeedZ(self, dist: float, speed: int):
         '''Linear move in the Z direction with a speed parameter.'''
-        self.write(f"G0 Z{dist} F{speed}")
+        self._write(f"G0 Z{dist} F{speed}")
         time.sleep(self.DELAY)
 
         return self
@@ -292,7 +301,7 @@ class Printer:
 
     def moveSpeedXY(self, dist: tuple, speed: int):
         '''Linear move in the XY direction with a speed parameter. Pass a tuple of distances in the order (X,Y).'''
-        self.write(f"G0 X{dist} Y{dist} F{speed}")
+        self._write(f"G0 X{dist} Y{dist} F{speed}")
         time.sleep(self.DELAY)
 
         return self
@@ -300,7 +309,7 @@ class Printer:
 
     def moveSpeedXZ(self, dist: tuple, speed: int):
         '''Linear move in the XZ direction with a speed parameter. Pass a tuple of distances in the order (X,Z).'''
-        self.write(f"G0 X{dist} Z{dist} F{speed}")
+        self._write(f"G0 X{dist} Z{dist} F{speed}")
         time.sleep(self.DELAY)
 
         return self
@@ -308,7 +317,7 @@ class Printer:
 
     def moveSpeedYZ(self, dist: tuple, speed: int):
         '''Linear move in the YZ direction with a speed parameter. Pass a tuple of distances in the order (Y,Z).'''
-        self.write(f"G0 Y{dist} Z{dist} F{speed}")
+        self._write(f"G0 Y{dist} Z{dist} F{speed}")
         time.sleep(self.DELAY)
 
         return self
@@ -316,7 +325,7 @@ class Printer:
 
     def moveSpeed(self, dist: tuple, speed: int):
         '''General linear move with a speed parameter. Pass a tuple of distances in the order (X,Y,Z).'''
-        self.write(f"G0 X{dist[0]} Y{dist[1]} Z{dist[2]} F{speed}")
+        self._write(f"G0 X{dist[0]} Y{dist[1]} Z{dist[2]} F{speed}")
         time.sleep(self.DELAY)
 
         return self
@@ -331,9 +340,9 @@ class Printer:
 
     def relMoveX(self, dist, speed=DEFAULT_SPEED):
         '''Performs a linear move in the X direction with relative positioning, then reverts back to absolute positioning.'''
-        self.write(self.GCODE["SET_REL"])
-        self.write(f"G0 X{dist} F{speed}")
-        self.write(self.GCODE["SET_ABS"])
+        self._write(self.GCODE["SET_REL"])
+        self._write(f"G0 X{dist} F{speed}")
+        self._write(self.GCODE["SET_ABS"])
 
         time.sleep(self.DELAY)
 
@@ -344,9 +353,9 @@ class Printer:
 
     def relMoveY(self, dist, speed=DEFAULT_SPEED):
         '''Performs a linear move in the X direction with relative positioning, then reverts back to absolute positioning.'''
-        self.write(self.GCODE["SET_REL"])
-        self.write(f"G0 Y{dist} F{speed}")
-        self.write(self.GCODE["SET_ABS"])
+        self._write(self.GCODE["SET_REL"])
+        self._write(f"G0 Y{dist} F{speed}")
+        self._write(self.GCODE["SET_ABS"])
 
         time.sleep(self.DELAY)
 
@@ -357,9 +366,9 @@ class Printer:
 
     def relMoveZ(self, dist, speed=DEFAULT_SPEED):
         '''Performs a linear move in the X direction with relative positioning, then reverts back to absolute positioning.'''
-        self.write(self.GCODE["SET_REL"])
-        self.write(f"G0 Z{dist} F{speed}")
-        self.write(self.GCODE["SET_ABS"])
+        self._write(self.GCODE["SET_REL"])
+        self._write(f"G0 Z{dist} F{speed}")
+        self._write(self.GCODE["SET_ABS"])
 
         time.sleep(self.DELAY)
 
@@ -379,13 +388,8 @@ class Printer:
     '''
     NONLINEAR MOVE COMMANDS
     '''
-    def relMoveCircle(self, radius, speed=DEFAULT_SPEED):
-        logger.log(20, f"Full circle move, radius {radius}, speed {speed}")
-        move_gcode = f"G2 I{radius} J{radius} F{speed}"
-        self.write(self.REL_POS_GCODE)
-        self.write(move_gcode)
-        self.checkOk()
-
+    def moveArcCW(self, p1, p2, p3, radius):
+        self._write(f"G2 X{p1} Y{p2} Z{p3} R{radius}")
         time.sleep(self.DELAY)
 
         return self
@@ -402,89 +406,9 @@ class Printer:
         move_xy = f"G0 {direction}{dist} F{speed}"
         lower = f"G0 Z{-height} F{speed}"
 
-        self.write(rise)
-        self.write(move_xy)
-        self.write(lower)
+        self._write(f"{rise}\n{move_xy}\n{lower}")
 
         return self
-
-
-    def circHopX(self, radius, speed=DEFAULT_SPEED):
-        distance = 2 * radius
-        x = 0.00
-        x_step = round(radius / self.STEPS, self.RESOLUTION)
-        z_step = 0
-        z = 0.00
-        batched_gcode = ""
-        for i in range(self.STEPS):
-            z = round(sqrt((radius**2) - ((x - radius)**2)), self.RESOLUTION)
-            print(f"r: {radius}, x: {x}, z: {z}")
-
-            batched_gcode += f"G0 X{x} Z{z}\n"
-            x = round(x + x_step, self.RESOLUTION)
-            # if (i % 10 == 0):
-            print(f"r: {radius}, x: {x}, z: {z}")
-            print(f"batched gcode: {batched_gcode}")
-        # self.write(batched_gcode)
-
-        batched_gcode = ""
-        for i in range(self.STEPS):
-            z = round(sqrt((radius**2) - ((x + radius)**2)), self.RESOLUTION)
-            print(f"r: {radius}, x: {x}, z: {z}")
-
-            batched_gcode += f"G0 X{x} Z{z}\n"
-            x = round(x + x_step, self.RESOLUTION)
-            print(f"r: {radius}, x: {x}, z: {z}")
-
-            # if (i % 10 == 0):
-            print(f"batched gcode: {batched_gcode}")
-        # self.write(batched_gcode)
-        # rise = f"G2 "
-
-    def circHop2(self, radius, speed=DEFAULT_SPEED):
-        distance = 2 * radius
-        current_x = 0.00
-        current_z = 0.00
-        theta = 0.0
-        angle_step = round(90.0 / self.STEPS, self.RESOLUTION)
-        batched_gcode = ""
-
-        for i in range(self.STEPS):
-            x = round(radius - (radius * cos(radians(theta))), self.RESOLUTION)
-            z = round(radius * sin(radians(theta)), self.RESOLUTION)
-
-            current_x = round(x - current_x, self.RESOLUTION)
-            current_z = round(z/2, self.RESOLUTION)
-            print(f"theta: {theta}, x: {current_x}, z: {current_z}")
-
-            batched_gcode += f"G0 X{current_x} Z{current_z}\n"
-
-            if (i % (self.BATCH_SIZE - 1) == 0):
-                self.write(batched_gcode)
-                print(f"batched gcode: {batched_gcode}")
-                batched_gcode = ""
-
-            theta += angle_step
-
-        print("---- GO BACK ----")
-
-
-        for i in range(self.STEPS):
-            x = round(radius - (radius * cos(radians(theta))), self.RESOLUTION)
-            z = round(radius * sin(radians(theta)), self.RESOLUTION)
-
-            current_x = round(x - current_x, self.RESOLUTION)
-            current_z = round(z/2, self.RESOLUTION)
-            print(f"theta: {theta}, x: {current_x}, z: {current_z}")
-
-            batched_gcode += f"G0 X{current_x} Z{current_z}\n"
-
-            if (i % (self.BATCH_SIZE - 1) == 0):
-                self.write(batched_gcode)
-                print(f"batched gcode: {batched_gcode}")
-                batched_gcode = ""
-
-            theta += angle_step
 
 
     '''
@@ -493,7 +417,7 @@ class Printer:
     def setSpeed(self, speed):
         '''Sets movement speed. Pass a value in mm/s and this function will convert to mm/min for the printer to understand.'''
         mms_to_mmmin = round(speed*60.0, 2)
-        self.write(f"G0 F{mms_to_mmmin}")
+        self._write(f"G0 F{mms_to_mmmin}")
         self.speed = mms_to_mmmin
         logger.log(20, f"Speed set to {speed} mm/s.")
 
@@ -504,20 +428,43 @@ class Printer:
         '''Set either relative or absolute coordinates. By default, set to absolute.'''
         match mode:
             case "rel":
-                self.write(self.GCODE["SET_REL"])
+                self._write(self.GCODE["SET_REL"])
             case "abs":
-                self.write(self.GCODE["SET_ABS"])
+                self._write(self.GCODE["SET_ABS"])
             case _:
-                self.write(self.GCODE["SET_ABS"])
+                self._write(self.GCODE["SET_ABS"])
 
         return self
+    
+
+    def setXYPlane(self):
+        '''Sets workspace plane to the XY plane. Allows G2, G3, G5 to operate in this plane.'''
+        self._write(self.GCODE["SET_XY_PLANE"])
+        time.sleep(self.DELAY)
+
+
+    def setZXPlane(self):
+        '''Sets workspace plane to the ZX plane. Allows G2, G3, G5 to operate in this plane.'''
+        self._write(self.GCODE["SET_ZX_PLANE"])
+        time.sleep(self.DELAY)
+
+
+    def setYZPlane(self):
+        '''Sets workspace plane to the YZ plane. Allows G2, G3, G5 to operate in this plane.'''
+        self._write(self.GCODE["SET_YZ_PLANE"])
+        time.sleep(self.DELAY)
 
 
     def checkOutOfBounds(self):
         pass
 
 
-    def write(self, gcode):
+    '''
+    INTERNAL METHODS
+    '''
+
+    def _write(self, gcode):
+        '''Writes string of gcode to the printer via serial port. Adds a newline character at the end to execute the command.'''
         gcode += "\n"
         gcode_to_bytes = gcode.encode("utf-8")
         print(f"Writing gcode {gcode_to_bytes}")
@@ -525,7 +472,11 @@ class Printer:
         self.conn.write(b'M84\n')
 
 
-    def batch_write(self, gcode: str, batch_count: int):
+    def _queueWrite(sef, gcode_list: list):
+        pass
+
+
+    def _batchWrite(self, gcode: str, batch_count: int):
         final_cmd = ""
         gcode += "\n"
         for i in range(batch_count):
@@ -534,6 +485,3 @@ class Printer:
         print(f"Writing gcode {gcode_to_bytes}")
         self.conn.write(gcode_to_bytes)
         self.conn.write(b'M84\n')
-
-    # if __name__=="__main__":
-    #     print("test")
