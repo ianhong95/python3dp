@@ -1,10 +1,3 @@
-import serial
-import logging
-import time
-import asyncio
-from math import sqrt, sin, cos, tan, degrees, radians
-
-
 '''
 Python API for controlling 3D printers via serial connection.
 Compatible with any printer that uses Marlin-based firmware. This firmware only supports sequential commands, so there's no live control or feedback.
@@ -15,6 +8,11 @@ In an attempt to optimize the flow of commands, separate methods are used for va
 to be sent in a single buffer. Reducing the amount of argument parsing and loops will generate the batches quicker. These optimizations come at the
 expense of a slightly more cumbersome library.
 '''
+
+import serial
+import logging
+import time
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename="api_logs.log", level=logging.INFO)
@@ -62,12 +60,6 @@ class Printer:
         # Initialize some variables
         self.conn = None    # serial connection
         self.ok = None
-
-        # Initialize queues
-        self.cmd_queue = []
-
-        # Initialize position list
-        self.pos = []
 
         # Attempt to connect to the device upon object initialization
         connected = self.connect()
@@ -474,14 +466,3 @@ class Printer:
 
     def _queueWrite(sef, gcode_list: list):
         pass
-
-
-    def _batchWrite(self, gcode: str, batch_count: int):
-        final_cmd = ""
-        gcode += "\n"
-        for i in range(batch_count):
-            final_cmd += gcode
-        gcode_to_bytes = final_cmd.encode("utf-8")
-        print(f"Writing gcode {gcode_to_bytes}")
-        self.conn.write(gcode_to_bytes)
-        self.conn.write(b'M84\n')
