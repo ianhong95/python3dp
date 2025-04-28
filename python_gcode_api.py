@@ -2,7 +2,7 @@
 Python API for controlling 3D printers via serial connection.
 Compatible with any printer that uses Marlin-based firmware. This firmware only supports sequential commands, so there's no live control or feedback.
 
-Motion commands can be chained such as Printer.moveX(5, 1000).moveY(5, 1000).moveZ(5, 1000)
+Motion commands can be chained such as Printer.moveX(5).moveY(5).moveZ(5)
 
 In an attempt to optimize the flow of commands, separate methods are used for various options. Shorter commands allow for a larger batch of commands
 to be sent in a single buffer. Reducing the amount of argument parsing and loops will generate the batches quicker. These optimizations come at the
@@ -12,6 +12,7 @@ expense of a slightly more cumbersome library.
 import serial
 import logging
 import time
+import json
 
 
 logger = logging.getLogger(__name__)
@@ -21,41 +22,29 @@ DEFAULT_SPEED = 5000
 
 class Printer:
     def __init__(self, serial_port):
+        with open("config.json", "r") as config_file:
+            config = json.load(config_file)
 
         # Constants
         self.SERIAL_PORT = serial_port  # example: /dev/ttyACM0
-        self.BAUDRATE = 115200
-        self.TIMEOUT = 5
-        self.DELAY = 0.1
-        self.STEPS = 30
+        self.BAUDRATE = config["serial_settings"]["baudrate"]
+        self.TIMEOUT = config["serial_settings"]["timeout"]
 
-        self.GCODE = {
-            "SET_ABS": "G90",
-            "SET_REL": "G91",
-            "SET_MM": "G21",
-            "SET_INCH": "G20",
+        self.DELAY = config["run_params"]["delay"]
+        self.STEPS = config["run_params"]["steps"]
+        self.RESOLUTION = config["run_params"]["resolution"]
+        self.BATCH_SIZE = config["run_params"]["batch_size"]
 
-            "SET_XY_PLANE": "G17",
-            "SET_ZX_PLANE": "G18",
-            "SET_YZ_PLANE": "G19",
+        self.GCODE = config["gcode"]    # Store the whole dictionary in this property
 
-            "GET_PRT_INFO": "M115",
-
-            "ENABLE_MOTORS": "M17",
-            "DISABLE_MOTORS": "M84",
-
-            "AUTO_HOME": "G28"
-        }
-
-        self.RESOLUTION = 3
-        self.BATCH_SIZE = 30
-        
         # Define printer parameters
         self.DIMS = {
             "LENGTH": 200,
             "WIDTH": 220,
             "HEIGHT": 200
         }
+
+        config_file.close()     # Close the config file after reading from it
 
         # Initialize some variables
         self.conn = None    # serial connection
@@ -72,7 +61,6 @@ class Printer:
             self.speed= DEFAULT_SPEED  # Mutable speed value
             self._write(self.GCODE["SET_ABS"])
             self._write(f"G0 F{DEFAULT_SPEED}")
-        
 
     def connect(self):
         print(f"Connecting to {self.SERIAL_PORT}")
@@ -93,6 +81,8 @@ class Printer:
 
     '''
     READ COMMANDS
+    
+    This set of methods is used to get feedback from the printer, such as the device information and responses after executing gcode.
     '''
 
     def getPrinterInfo(self):
@@ -121,6 +111,10 @@ class Printer:
     
 
     def checkOk(self):
+        '''
+        WIP. This method will be used to verify that gcode has been executed successfully before proceeding.
+        '''
+
         ok_response = False
         response = None
 

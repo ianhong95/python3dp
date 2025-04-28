@@ -19,7 +19,7 @@ def setupReadline():
 
 def runTerminal():
     try: 
-        # p = Printer("/dev/ttyACM0")
+        p = Printer("/dev/ttyACM0")
         print("Connected successfully!")
     except:
         print("Error connecting to printer")

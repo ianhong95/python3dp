@@ -1,0 +1,41 @@
+{
+    "serial_settings": {
+        "port": "/dev/ttyACM0",
+        "baudrate": 115200,
+        "timeout": 5
+    },
+
+    "printer_params": {
+        "origin_offset": [0, 0, 0],
+        "x_lim": 250,
+        "y_lim": 220,
+        "z_lim": 220,
+        "default_speed": 5000
+    },
+
+    "run_params": {
+        "delay": 0.1,
+        "resolution": 3,
+        "batch_size": 20,
+        "steps": 30
+    },
+
+    "gcode": {
+        "SET_ABS": "G90",
+        "SET_REL": "G91",
+        "SET_MM": "G21",
+        "SET_INCH": "G20",
+
+        "SET_XY_PLANE": "G17",
+        "SET_ZX_PLANE": "G18",
+        "SET_YZ_PLANE": "G19",
+
+        "GET_PRT_INFO": "M115",
+
+        "ENABLE_MOTORS": "M17",
+        "DISABLE_MOTORS": "M84",
+
+        "AUTO_HOME": "G28"
+    }
+
+}
