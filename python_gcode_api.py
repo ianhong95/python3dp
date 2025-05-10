@@ -7,6 +7,8 @@ Motion commands can be chained such as Printer.moveX(5).moveY(5).moveZ(5)
 In an attempt to optimize the flow of commands, separate methods are used for various options. Shorter commands allow for a larger batch of commands
 to be sent in a single buffer. Reducing the amount of argument parsing and loops will generate the batches quicker. These optimizations come at the
 expense of a slightly more cumbersome library.
+
+This library requires a separate config.json file for setting the printer's parameters and serial connection settings.
 '''
 
 import serial
@@ -18,40 +20,21 @@ import json
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename="api_logs.log", level=logging.INFO)
 
-DEFAULT_SPEED = 5000
+DEFAULT_SPEED = 5000    # mm/min
 
 class Printer:
     def __init__(self, serial_port):
-        with open("config.json", "r") as config_file:
-            config = json.load(config_file)
-
-        # Constants
         self.SERIAL_PORT = serial_port  # example: /dev/ttyACM0
-        self.BAUDRATE = config["serial_settings"]["baudrate"]
-        self.TIMEOUT = config["serial_settings"]["timeout"]
-
-        self.DELAY = config["run_params"]["delay"]
-        self.STEPS = config["run_params"]["steps"]
-        self.RESOLUTION = config["run_params"]["resolution"]
-        self.BATCH_SIZE = config["run_params"]["batch_size"]
-
-        self.GCODE = config["gcode"]    # Store the whole dictionary in this property
-
-        # Define printer parameters
-        self.DIMS = {
-            "LENGTH": 200,
-            "WIDTH": 220,
-            "HEIGHT": 200
-        }
-
-        config_file.close()     # Close the config file after reading from it
+        self._loadConfig()
 
         # Initialize some variables
         self.conn = None    # serial connection
         self.ok = None
+        self.current_plane = "XY"
+        self.current_corrds = [0, 0, 0]
 
         # Attempt to connect to the device upon object initialization
-        connected = self.connect()
+        connected = self._connect()
 
         # On successful connection, print machine information and initialize some parameters
         if connected:
@@ -61,22 +44,6 @@ class Printer:
             self.speed= DEFAULT_SPEED  # Mutable speed value
             self._write(self.GCODE["SET_ABS"])
             self._write(f"G0 F{DEFAULT_SPEED}")
-
-    def connect(self):
-        print(f"Connecting to {self.SERIAL_PORT}")
-        try:
-            self.conn = serial.Serial(self.SERIAL_PORT, self.BAUDRATE, self.TIMEOUT)
-            time.sleep(2)
-        except Exception as e:
-            print("Could not connect")
-            logger.log(20, "Could not connect to serial device.")
-            exit()
-
-        if self.conn:
-            logger.log(20, f"Successfully connected to serial device {self.SERIAL_PORT}!")
-            print("Connection successful!")
-
-        return True
 
 
     '''
@@ -131,29 +98,36 @@ class Printer:
     
 
     def getCurrentPos(self):
+        # Don't know if this method is really useful if we always work in absolute coords
         pass
 
     '''
     MANUAL COMMANDS
     '''
-    def enableMotors(self, motors="XYZ"):
-        '''Enables specified motors. If no arguments are passed, all motors will be enabled.'''
+    def enableMotors(self, motors:str="XYZ"):
+        '''Enables specified motors. Specify any combination of X, Y, and/or Z. If no arguments are passed, all motors will be enabled.'''
         gcode = f"{self.GCODE['ENABLE_MOTORS']}"
 
         for m in motors:
-            gcode += f" {m}"
+            if m in "XYZ":
+                gcode += f" {m}"
+            else:
+                raise Exception(f"Invalid motor argument in enableMotors(): {m}")
 
         self._write(gcode)
 
         logger.log(20, f"Enabling motors {motors}")
 
     
-    def disableMotors(self, motors="XYZ"):
-        '''Disables specified motors. If no arguments are passed, all motors will be disabled.'''
+    def disableMotors(self, motors:str="XYZ"):
+        '''Disables specified motors. Specify any combination of X, Y, and/or Z. If no arguments are passed, all motors will be disabled.'''
         gcode = f"{self.GCODE['DISABLE_MOTORS']}"
 
         for m in motors:
-            gcode += f" {m}"
+            if m in "XYZ":
+                gcode += f" {m}"
+            else:
+                raise Exception(f"Invalid motor argument in disableMotors(): {m}")
 
         self._write(gcode)
 
@@ -163,28 +137,22 @@ class Printer:
     '''
     HOMING COMMANDS
     '''
-    def home(self, axes="XYZ"):
+    def home(self, axes:str="XYZ"):
         '''
         Homes specified axes. Pass a string with up to 3 axes Passing no arguments will home all axes by default.
         '''
-        match axes:
-            case "X":
-                self._write(f"{self.GCODE['AUTO_HOME']} X")
-            case "Y":
-                self._write(f"{self.GCODE['AUTO_HOME']} Y")
-            case "Z":
-                self._write(f"{self.GCODE['AUTO_HOME']} Z")
-            case "XY" | "YX":
-                self._write(f"{self.GCODE['AUTO_HOME']} X Y")
-            case "XZ" | "ZX":
-                self._write(f"{self.GCODE['AUTO_HOME']} X Z")
-            case "YZ" | "ZY":
-                self._write(f"{self.GCODE['AUTO_HOME']} Y Z")
-            case "XYZ":
-                self._write(f"{self.GCODE['AUTO_HOME']} X Y Z")
-            case _:
-                print("Invalid auto-home command.")
-                exit()
+
+        gcode = f"{self.GCODE['AUTO_HOME']}"
+
+        for a in axes:
+            print(f"Checking {a}")
+            if a in "XYZ":
+                print(f"{a} in 'XYZ'")
+                gcode += f" {a}"
+            else:
+                raise Exception(f"Invalid axis argument for auto-home: {a}")
+
+        self._write(gcode)
 
         time.sleep(self.DELAY)
 
@@ -201,57 +169,108 @@ class Printer:
     These commands can be chained. For example: Printer.moveX(50).moveY(50).moveXY([50,50])
     '''
 
-    def moveX(self, dist: float):
+    def moveX(self, target: float):
         '''Linear move in the X direction.'''
-        self._write(f"G0 X{dist}")
+        if target >= 0 and target < self.LIMITS["X"]:
+            self._write(f"G0 X{target}")
+        else:
+            raise Exception(f"moveX() command exceeds boundary. Target: {target}")
+        
         time.sleep(self.DELAY)
 
         return self
     
     
-    def moveY(self, dist: float):
+    def moveY(self, target: float):
         '''Linear move in the Y direction.'''
-        self._write(f"G0 Y{dist}")
+        if target >= 0 and target < self.LIMITS["Y"]:
+            self._write(f"G0 Y{target}")
+        else:
+            raise Exception(f"moveY() command exceeds boundary. Target: {target}")
+                
         time.sleep(self.DELAY)
 
         return self
     
     
-    def moveZ(self, dist: float):
+    def moveZ(self, target: float):
         '''Linear move in the Z direction.'''
-        self._write(f"G0 Z{dist}")
+        if target >= 0 and target < self.LIMITS["Z"]:
+            self._write(f"G0 Z{target}")
+        else:
+            raise Exception(f"moveZ() command exceeds boundary. Target: {target}")
+        
         time.sleep(self.DELAY)
 
         return self
     
 
-    def moveXY(self, dist: tuple):
-        '''Linear move diagonally in the XY direction. Pass a tuple of distances in the order (X,Y).'''
-        self._write(f"G0 X{dist[0]} Y{dist[1]}")
+    def moveXY(self, target: list):
+        '''Linear move diagonally in the XY direction. Pass a list of coordinates in the order (X,Y).'''
+
+        if (
+            target[0] >= 0 and 
+            target[1] >= 0 and
+            target[0] < self.LIMITS["X"] and
+            target[1] < self.LIMITS["Y"]
+            ):
+            self._write(f"G0 X{target[0]} Y{target[1]}")
+        else:
+            raise Exception(f"moveXY() command exceeds boundary. Target: {target}")
+                 
         time.sleep(self.DELAY)
 
         return self
     
 
-    def moveXZ(self, dist: tuple):
-        '''Linear move diagonally in the XZ direction. Pass a tuple of distances in the order (X,Z).'''
-        self._write(f"G0 X{dist[0]} Z{dist[1]}")
+    def moveXZ(self, target: list):
+        '''Linear move diagonally in the XZ direction. Pass a list of coordinates in the order (X,Z).'''
+        if (
+            target[0] >= 0 and 
+            target[1] >= 0 and
+            target[0] < self.LIMITS["X"] and
+            target[1] < self.LIMITS["Z"]
+            ):
+            self._write(f"G0 X{target[0]} Z{target[1]}")
+        else:
+            raise Exception(f"moveXZ() command exceeds boundary. Target: {target}")
+        
         time.sleep(self.DELAY)
 
         return self
     
 
-    def moveYZ(self, dist: tuple):
-        '''Linear move diagonally in the YZ direction. Pass a tuple of distances in the order (Y,Z).'''
-        self._write(f"G0 Y{dist[0]} Z{dist[1]}")
+    def moveYZ(self, target: list):
+        '''Linear move diagonally in the YZ direction. Pass a list of coordinates in the order (Y,Z).'''
+        if (
+            target[0] >= 0 and 
+            target[1] >= 0 and
+            target[0] < self.LIMITS["Y"] and
+            target[1] < self.LIMITS["Z"]
+            ):        
+            self._write(f"G0 Y{target[0]} Z{target[1]}")
+        else:
+            raise Exception(f"moveYZ() command exceeds boundary. Target: {target}")
+                    
         time.sleep(self.DELAY)
 
         return self
     
 
-    def move(self, dist: tuple):
-        '''General linear move command. Pass a tuple of distances in the order (X,Y,Z).'''
-        self._write(f"G0 X{dist[0]} Y{dist[1]} Z{dist[2]}")
+    def move(self, target: list):
+        '''General linear move command. Pass a list of coordinates in the order (X,Y,Z).'''
+        if (
+            target[0] >= 0 and 
+            target[1] >= 0 and
+            target[2] >= 0 and
+            target[0] < self.LIMITS["X"] and
+            target[1] < self.LIMITS["Y"] and
+            target[2] < self.LIMITS["Z"]
+            ):        
+            self._write(f"G0 X{target[0]} Y{target[1]} Z{target[2]}")
+        else:
+            raise Exception(f"move() command exceeds boundary. Target: {target}")
+                    
         time.sleep(self.DELAY)
 
         return self
@@ -261,57 +280,57 @@ class Printer:
     BASIC LINEAR MOVE COMMANDS WITH SPEED PARAMETER
     '''
 
-    def moveSpeedX(self, dist: float, speed: int):
+    def moveSpeedX(self, target: float, speed: int):
         '''Linear move in the X direction with a speed parameter.'''
-        self._write(f"G0 X{dist} F{speed}")
+        self._write(f"G0 X{target} F{speed}")
         time.sleep(self.DELAY)
 
         return self
     
 
-    def moveSpeedY(self, dist: float, speed: int):
+    def moveSpeedY(self, target: float, speed: int):
         '''Linear move in the Y direction with a speed parameter.'''
-        self._write(f"G0 Y{dist} F{speed}")
+        self._write(f"G0 Y{target} F{speed}")
         time.sleep(self.DELAY)
 
         return self
     
 
-    def moveSpeedZ(self, dist: float, speed: int):
+    def moveSpeedZ(self, target: float, speed: int):
         '''Linear move in the Z direction with a speed parameter.'''
-        self._write(f"G0 Z{dist} F{speed}")
+        self._write(f"G0 Z{target} F{speed}")
         time.sleep(self.DELAY)
 
         return self
     
 
-    def moveSpeedXY(self, dist: tuple, speed: int):
-        '''Linear move in the XY direction with a speed parameter. Pass a tuple of distances in the order (X,Y).'''
-        self._write(f"G0 X{dist} Y{dist} F{speed}")
+    def moveSpeedXY(self, target: tuple, speed: int):
+        '''Linear move in the XY direction with a speed parameter. Pass a tuple of coordinates in the order (X,Y).'''
+        self._write(f"G0 X{target} Y{target} F{speed}")
         time.sleep(self.DELAY)
 
         return self
     
 
-    def moveSpeedXZ(self, dist: tuple, speed: int):
-        '''Linear move in the XZ direction with a speed parameter. Pass a tuple of distances in the order (X,Z).'''
-        self._write(f"G0 X{dist} Z{dist} F{speed}")
+    def moveSpeedXZ(self, target: tuple, speed: int):
+        '''Linear move in the XZ direction with a speed parameter. Pass a tuple of coordinates in the order (X,Z).'''
+        self._write(f"G0 X{target} Z{target} F{speed}")
         time.sleep(self.DELAY)
 
         return self
     
 
-    def moveSpeedYZ(self, dist: tuple, speed: int):
-        '''Linear move in the YZ direction with a speed parameter. Pass a tuple of distances in the order (Y,Z).'''
-        self._write(f"G0 Y{dist} Z{dist} F{speed}")
+    def moveSpeedYZ(self, target: tuple, speed: int):
+        '''Linear move in the YZ direction with a speed parameter. Pass a tuple of coordinates in the order (Y,Z).'''
+        self._write(f"G0 Y{target} Z{target} F{speed}")
         time.sleep(self.DELAY)
 
         return self
     
 
-    def moveSpeed(self, dist: tuple, speed: int):
-        '''General linear move with a speed parameter. Pass a tuple of distances in the order (X,Y,Z).'''
-        self._write(f"G0 X{dist[0]} Y{dist[1]} Z{dist[2]} F{speed}")
+    def moveSpeed(self, target: tuple, speed: int):
+        '''General linear move with a speed parameter. Pass a tuple of coordinates in the order (X,Y,Z).'''
+        self._write(f"G0 X{target[0]} Y{target[1]} Z{target[2]} F{speed}")
         time.sleep(self.DELAY)
 
         return self
@@ -373,13 +392,30 @@ class Printer:
 
     '''
     NONLINEAR MOVE COMMANDS
+
+    Movements such as arcs and circles. It seems like Prusa's Buddy firmware doesn't support G17/G18/G19.
     '''
-    def moveArcCW(self, p1, p2, p3, radius):
-        self._write(f"G2 X{p1} Y{p2} Z{p3} R{radius}")
+    def moveArcCW(self, radius:float, x:float, y:float, z:float = -1):
+        match (z):
+            case (-1):
+                self._write(f"G2 X{x} Y{y} R{radius}")
+            case _:
+                self._write(f"G2 X{x} Y{y} Z{z} R{radius}")
         time.sleep(self.DELAY)
 
         return self
+    
 
+    def moveArcCCW(self, radius:float, x:float, y:float, z:float = -1):
+        match (z):
+            case (-1):
+                self._write(f"G3 X{x} Y{y} R{radius}")
+            case _:
+                self._write(f"G3 X{x} Y{y} Z{z} R{radius}")
+        time.sleep(self.DELAY)
+
+        return self
+    
 
     '''
     COMBO MOVES
@@ -400,8 +436,10 @@ class Printer:
     '''
     UTILITY FUNCTIONS
     '''
-    def setSpeed(self, speed):
+    def setSpeed(self, speed:float):
         '''Sets movement speed. Pass a value in mm/s and this function will convert to mm/min for the printer to understand.'''
+        
+
         mms_to_mmmin = round(speed*60.0, 2)
         self._write(f"G0 F{mms_to_mmmin}")
         self.speed = mms_to_mmmin
@@ -410,15 +448,15 @@ class Printer:
         return self
 
 
-    def setMode(self, mode):
-        '''Set either relative or absolute coordinates. By default, set to absolute.'''
+    def setMode(self, mode:str):
+        '''Set either relative ("rel") or absolute ("abs") coordinates. By default, set to absolute.'''
         match mode:
             case "rel":
                 self._write(self.GCODE["SET_REL"])
             case "abs":
                 self._write(self.GCODE["SET_ABS"])
             case _:
-                self._write(self.GCODE["SET_ABS"])
+                raise Exception(f"Invalid mode {mode}. Valid parameters are either 'rel' or 'abs'.")
 
         return self
     
@@ -426,19 +464,28 @@ class Printer:
     def setXYPlane(self):
         '''Sets workspace plane to the XY plane. Allows G2, G3, G5 to operate in this plane.'''
         self._write(self.GCODE["SET_XY_PLANE"])
+        self.current_plane = "XY"
         time.sleep(self.DELAY)
+
+        return self
 
 
     def setZXPlane(self):
-        '''Sets workspace plane to the ZX plane. Allows G2, G3, G5 to operate in this plane.'''
+        '''Sets workspace plane to the ZX plane using G18. Allows G2, G3, G5 to operate in this plane.'''
         self._write(self.GCODE["SET_ZX_PLANE"])
+        self.current_plane = "ZX"
         time.sleep(self.DELAY)
+
+        return self
 
 
     def setYZPlane(self):
         '''Sets workspace plane to the YZ plane. Allows G2, G3, G5 to operate in this plane.'''
         self._write(self.GCODE["SET_YZ_PLANE"])
+        self.current_plane = "YZ"
         time.sleep(self.DELAY)
+
+        return self
 
 
     def checkOutOfBounds(self):
@@ -448,6 +495,54 @@ class Printer:
     '''
     INTERNAL METHODS
     '''
+
+    def _loadConfig(self):
+        '''Load parameters defined in the config.json file.'''
+        try:
+            with open("config.json", "r") as config_file:
+                config = json.load(config_file)
+                
+            # Constants
+            self.BAUDRATE = config["serial_settings"]["baudrate"]
+            self.TIMEOUT = config["serial_settings"]["timeout"]
+
+            self.DELAY = config["run_params"]["delay"]
+            self.STEPS = config["run_params"]["steps"]
+            self.RESOLUTION = config["run_params"]["resolution"]
+            self.BATCH_SIZE = config["run_params"]["batch_size"]
+            self.COORD_DEADBAND = config["run_params"]["coord_deadband"]
+
+            self.GCODE = config["gcode"]    # Store the whole dictionary in this property
+
+            # Define printer parameters
+            self.LIMITS = {
+                "X": config["printer_params"]["soft_limits"]["x"],
+                "Y": config["printer_params"]["soft_limits"]["y"],
+                "Z": config["printer_params"]["soft_limits"]["z"]
+            }
+
+            config_file.close()     # Close the config file after reading from it
+        except:
+            print("Could not find config.json.")
+            exit()
+
+
+    def _connect(self):
+        print(f"Connecting to {self.SERIAL_PORT}")
+        try:
+            self.conn = serial.Serial(self.SERIAL_PORT, self.BAUDRATE, self.TIMEOUT)
+            time.sleep(2)
+        except Exception as e:
+            print("Could not connect")
+            logger.log(20, "Could not connect to serial device.")
+            exit()
+
+        if self.conn:
+            logger.log(20, f"Successfully connected to serial device {self.SERIAL_PORT}!")
+            print("Connection successful!")
+
+        return True
+
 
     def _write(self, gcode):
         '''Writes string of gcode to the printer via serial port. Adds a newline character at the end to execute the command.'''

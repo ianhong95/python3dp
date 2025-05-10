@@ -11,8 +11,8 @@ def test_motion(p: Printer):
     p.moveZ(20)
     p.moveX(60).moveY(60)
     p.setZXPlane()
-    p.moveArcCW(100, 100, 100, 2)
-    p.moveArcCW(120, 60, 20, 50)
+    p.moveArcCW(40, 100, 60)
+    p.moveArcCW(40, 140, 20)
     p.disableMotors()
 
 

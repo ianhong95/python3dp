@@ -7,17 +7,29 @@
 
     "printer_params": {
         "origin_offset": [0, 0, 0],
-        "x_lim": 250,
-        "y_lim": 220,
-        "z_lim": 220,
-        "default_speed": 5000
+        "physical_limits": {
+            "x": 250,
+            "y": 210,
+            "z": 220
+        },
+        "soft_limits": {
+            "x": 240,
+            "y": 200,
+            "z": 180
+        },
+        "speed": {
+            "default": 5000,
+            "min": 100,
+            "max": 10000
+        }
     },
 
     "run_params": {
         "delay": 0.1,
         "resolution": 3,
         "batch_size": 20,
-        "steps": 30
+        "steps": 30,
+        "coord_deadband": 0.01
     },
 
     "gcode": {
